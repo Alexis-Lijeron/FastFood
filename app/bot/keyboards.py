@@ -197,8 +197,43 @@ def get_metodo_pago_keyboard() -> InlineKeyboardMarkup:
     """
     keyboard = [
         [InlineKeyboardButton("💵 Efectivo", callback_data="pago_EFECTIVO")],
-        [InlineKeyboardButton("💳 QR / Transferencia", callback_data="pago_QR")],
+        [InlineKeyboardButton("📱 Pago QR", callback_data="mostrar_qr")],
+        [InlineKeyboardButton("💳 Tarjeta de Crédito/Débito", callback_data="pago_tarjeta")],
         [InlineKeyboardButton("🔙 Volver", callback_data="ver_resumen")],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_qr_pago_keyboard() -> InlineKeyboardMarkup:
+    """
+    Teclado después de mostrar QR
+    """
+    keyboard = [
+        [InlineKeyboardButton("✅ Ya pagué", callback_data="confirmar_pago_qr")],
+        [InlineKeyboardButton("❌ Cancelar", callback_data="ver_resumen")],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_tarjeta_keyboard() -> InlineKeyboardMarkup:
+    """
+    Teclado para ingresar datos de tarjeta
+    """
+    keyboard = [
+        [InlineKeyboardButton("💳 Ingresar datos de tarjeta", callback_data="ingresar_tarjeta")],
+        [InlineKeyboardButton("❌ Cancelar", callback_data="ver_resumen")],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_confirmar_tarjeta_keyboard() -> InlineKeyboardMarkup:
+    """
+    Teclado para confirmar pago con tarjeta
+    """
+    keyboard = [
+        [InlineKeyboardButton("✅ Confirmar Pago", callback_data="confirmar_pago_tarjeta")],
+        [InlineKeyboardButton("🔙 Cambiar datos", callback_data="ingresar_tarjeta")],
+        [InlineKeyboardButton("❌ Cancelar", callback_data="ver_resumen")],
     ]
     return InlineKeyboardMarkup(keyboard)
 

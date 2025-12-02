@@ -17,7 +17,10 @@ from app.bot.keyboards import (
     get_rastrear_keyboard,
     get_tracking_keyboard,
     get_carrito_editar_keyboard,
-    get_item_carrito_keyboard
+    get_item_carrito_keyboard,
+    get_qr_pago_keyboard,
+    get_tarjeta_keyboard,
+    get_confirmar_tarjeta_keyboard
 )
 from app.database import SessionLocal
 from app.models import Categoria, Producto, ClienteBot, Pedido, ItemPedido, Conductor
@@ -660,10 +663,30 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=get_confirmar_pedido_keyboard()
         )
     
-    # Método de pago
-    elif data.startswith("pago_"):
-        metodo = data.replace("pago_", "")
-        await finalizar_pedido(query, context, metodo)
+    # ============ MÉTODOS DE PAGO ============
+    # Mostrar QR para pago
+    elif data == "mostrar_qr":
+        await mostrar_qr_pago(query, context)
+    
+    # Confirmar pago QR
+    elif data == "confirmar_pago_qr":
+        await procesar_pago_qr(query, context)
+    
+    # Mostrar formulario tarjeta
+    elif data == "pago_tarjeta":
+        await mostrar_pago_tarjeta(query, context)
+    
+    # Ingresar datos de tarjeta
+    elif data == "ingresar_tarjeta":
+        await solicitar_datos_tarjeta(query, context)
+    
+    # Confirmar pago tarjeta
+    elif data == "confirmar_pago_tarjeta":
+        await procesar_pago_tarjeta(query, context)
+    
+    # Método de pago efectivo (directo)
+    elif data == "pago_EFECTIVO":
+        await finalizar_pedido(query, context, "EFECTIVO")
 
 
 # ============ MOSTRAR RESUMEN ============
@@ -875,6 +898,401 @@ async def procesar_pago(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown',
         reply_markup=get_metodo_pago_keyboard()
     )
+
+
+# ============ PAGO QR ============
+async def mostrar_qr_pago(query, context: ContextTypes.DEFAULT_TYPE):
+    """Muestra el código QR para pago"""
+    carrito = context.user_data.get('carrito', [])
+    
+    if not carrito:
+        await query.answer("❌ Tu carrito está vacío")
+        return
+    
+    total = sum(item['precio'] * item['cantidad'] for item in carrito)
+    
+    # Ruta del QR
+    qr_path = "img/qr.jpg"
+    
+    try:
+        # Eliminar mensaje anterior si es texto
+        try:
+            await query.message.delete()
+        except:
+            pass
+        
+        # Enviar imagen del QR
+        with open(qr_path, 'rb') as qr_file:
+            qr_msg = await query.message.chat.send_photo(
+                photo=qr_file,
+                caption=f"📱 *PAGO CON QR*\n\n"
+                        f"💰 *Total a pagar: Bs. {total:.2f}*\n\n"
+                        f"1️⃣ Escanea el código QR\n"
+                        f"2️⃣ Realiza la transferencia\n"
+                        f"3️⃣ Presiona 'Ya pagué'\n\n"
+                        f"⚠️ _El monto debe ser exacto_",
+                parse_mode='Markdown',
+                reply_markup=get_qr_pago_keyboard()
+            )
+            # Guardar ID del mensaje QR para eliminarlo después
+            context.user_data['qr_msg_id'] = qr_msg.message_id
+    except FileNotFoundError:
+        await query.message.chat.send_message(
+            "❌ Error: No se encontró el código QR.\n"
+            "Por favor, selecciona otro método de pago.",
+            reply_markup=get_metodo_pago_keyboard()
+        )
+
+
+async def procesar_pago_qr(query, context: ContextTypes.DEFAULT_TYPE):
+    """Procesa el pago por QR (simulado)"""
+    import asyncio
+    
+    # Eliminar mensaje del QR
+    qr_msg_id = context.user_data.get('qr_msg_id')
+    if qr_msg_id:
+        try:
+            await context.bot.delete_message(
+                chat_id=query.message.chat_id,
+                message_id=qr_msg_id
+            )
+        except:
+            pass
+        context.user_data.pop('qr_msg_id', None)
+    
+    # Mostrar mensaje de verificación
+    try:
+        await query.message.delete()
+    except:
+        pass
+    
+    verificando_msg = await query.message.chat.send_message(
+        "⏳ *Verificando pago...*\n\n"
+        "Por favor espera mientras confirmamos tu transferencia.",
+        parse_mode='Markdown'
+    )
+    
+    # Simular verificación (2 segundos)
+    await asyncio.sleep(2)
+    
+    # Eliminar mensaje de verificación
+    try:
+        await verificando_msg.delete()
+    except:
+        pass
+    
+    # Confirmar pago
+    await query.message.chat.send_message(
+        "✅ *¡PAGO CONFIRMADO!*\n\n"
+        "Tu transferencia ha sido verificada exitosamente.\n"
+        "Procesando tu pedido...",
+        parse_mode='Markdown'
+    )
+    
+    await asyncio.sleep(1)
+    
+    # Finalizar pedido
+    await finalizar_pedido_directo(query, context, "QR / Transferencia")
+
+
+# ============ PAGO TARJETA ============
+async def mostrar_pago_tarjeta(query, context: ContextTypes.DEFAULT_TYPE):
+    """Muestra opciones de pago con tarjeta"""
+    carrito = context.user_data.get('carrito', [])
+    
+    if not carrito:
+        await query.answer("❌ Tu carrito está vacío")
+        return
+    
+    total = sum(item['precio'] * item['cantidad'] for item in carrito)
+    
+    await _enviar_o_editar_mensaje(
+        query,
+        f"💳 *PAGO CON TARJETA*\n\n"
+        f"💰 *Total a pagar: Bs. {total:.2f}*\n\n"
+        f"Ingresa los datos de tu tarjeta de crédito o débito.\n\n"
+        f"🔒 _Tus datos están protegidos_",
+        get_tarjeta_keyboard()
+    )
+
+
+async def solicitar_datos_tarjeta(query, context: ContextTypes.DEFAULT_TYPE):
+    """Solicita los datos de la tarjeta (simulado)"""
+    context.user_data['esperando_tarjeta'] = True
+    context.user_data['paso_tarjeta'] = 'numero'
+    
+    keyboard = [[InlineKeyboardButton("❌ Cancelar", callback_data="ver_resumen")]]
+    
+    await _enviar_o_editar_mensaje(
+        query,
+        "💳 *DATOS DE TARJETA*\n\n"
+        "Por favor, ingresa el *número de tarjeta* (16 dígitos):\n\n"
+        "_Ejemplo: 4111 1111 1111 1111_",
+        InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def procesar_datos_tarjeta(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Procesa los datos de tarjeta ingresados por el usuario"""
+    if not context.user_data.get('esperando_tarjeta'):
+        return False
+    
+    texto = update.message.text.strip()
+    paso = context.user_data.get('paso_tarjeta', 'numero')
+    
+    if paso == 'numero':
+        # Validar número de tarjeta (solo dígitos, 13-19 caracteres)
+        numero_limpio = texto.replace(" ", "").replace("-", "")
+        if not numero_limpio.isdigit() or len(numero_limpio) < 13 or len(numero_limpio) > 19:
+            await update.message.reply_text(
+                "❌ Número de tarjeta inválido.\n\n"
+                "Ingresa un número válido de 13-19 dígitos:"
+            )
+            return True
+        
+        # Guardar número (solo últimos 4 dígitos por seguridad)
+        context.user_data['tarjeta_ultimos4'] = numero_limpio[-4:]
+        context.user_data['paso_tarjeta'] = 'vencimiento'
+        
+        await update.message.reply_text(
+            "✅ Número registrado\n\n"
+            "Ahora ingresa la *fecha de vencimiento* (MM/AA):\n\n"
+            "_Ejemplo: 12/25_",
+            parse_mode='Markdown'
+        )
+        return True
+    
+    elif paso == 'vencimiento':
+        # Validar formato MM/AA
+        if '/' not in texto or len(texto) < 4:
+            await update.message.reply_text(
+                "❌ Formato inválido.\n\n"
+                "Ingresa la fecha en formato MM/AA:"
+            )
+            return True
+        
+        context.user_data['tarjeta_vencimiento'] = texto
+        context.user_data['paso_tarjeta'] = 'cvv'
+        
+        await update.message.reply_text(
+            "✅ Fecha registrada\n\n"
+            "Ahora ingresa el *CVV* (3-4 dígitos):\n\n"
+            "_El código de seguridad en el reverso de tu tarjeta_",
+            parse_mode='Markdown'
+        )
+        return True
+    
+    elif paso == 'cvv':
+        # Validar CVV
+        if not texto.isdigit() or len(texto) < 3 or len(texto) > 4:
+            await update.message.reply_text(
+                "❌ CVV inválido.\n\n"
+                "Ingresa un código de 3-4 dígitos:"
+            )
+            return True
+        
+        context.user_data['paso_tarjeta'] = 'nombre'
+        
+        await update.message.reply_text(
+            "✅ CVV registrado\n\n"
+            "Finalmente, ingresa el *nombre del titular*:\n\n"
+            "_Como aparece en la tarjeta_",
+            parse_mode='Markdown'
+        )
+        return True
+    
+    elif paso == 'nombre':
+        if len(texto) < 3:
+            await update.message.reply_text(
+                "❌ Nombre muy corto.\n\n"
+                "Ingresa el nombre completo del titular:"
+            )
+            return True
+        
+        context.user_data['tarjeta_nombre'] = texto
+        context.user_data['esperando_tarjeta'] = False
+        
+        carrito = context.user_data.get('carrito', [])
+        total = sum(item['precio'] * item['cantidad'] for item in carrito)
+        
+        # Mostrar resumen de tarjeta
+        await update.message.reply_text(
+            f"💳 *CONFIRMAR PAGO*\n\n"
+            f"*Tarjeta:* •••• •••• •••• {context.user_data['tarjeta_ultimos4']}\n"
+            f"*Vencimiento:* {context.user_data['tarjeta_vencimiento']}\n"
+            f"*Titular:* {texto.upper()}\n\n"
+            f"💰 *Total: Bs. {total:.2f}*\n\n"
+            f"¿Confirmar pago?",
+            parse_mode='Markdown',
+            reply_markup=get_confirmar_tarjeta_keyboard()
+        )
+        return True
+    
+    return False
+
+
+async def procesar_pago_tarjeta(query, context: ContextTypes.DEFAULT_TYPE):
+    """Procesa el pago con tarjeta (simulado)"""
+    import asyncio
+    
+    # Mostrar procesando
+    await _enviar_o_editar_mensaje(
+        query,
+        "⏳ *Procesando pago...*\n\n"
+        "Conectando con el banco...",
+        None
+    )
+    
+    await asyncio.sleep(1.5)
+    
+    await query.message.edit_text(
+        "⏳ *Procesando pago...*\n\n"
+        "Verificando datos de tarjeta...",
+        parse_mode='Markdown'
+    )
+    
+    await asyncio.sleep(1.5)
+    
+    await query.message.edit_text(
+        "⏳ *Procesando pago...*\n\n"
+        "Autorizando transacción...",
+        parse_mode='Markdown'
+    )
+    
+    await asyncio.sleep(1)
+    
+    # Pago exitoso
+    ultimos4 = context.user_data.get('tarjeta_ultimos4', '****')
+    
+    await query.message.edit_text(
+        f"✅ *¡PAGO APROBADO!*\n\n"
+        f"Tarjeta: •••• {ultimos4}\n"
+        f"Transacción exitosa.\n\n"
+        f"Procesando tu pedido...",
+        parse_mode='Markdown'
+    )
+    
+    await asyncio.sleep(1)
+    
+    # Limpiar datos de tarjeta
+    context.user_data.pop('tarjeta_ultimos4', None)
+    context.user_data.pop('tarjeta_vencimiento', None)
+    context.user_data.pop('tarjeta_nombre', None)
+    
+    # Finalizar pedido
+    await finalizar_pedido_directo(query, context, "Tarjeta de Crédito/Débito")
+
+
+# ============ FINALIZAR PEDIDO DIRECTO ============
+async def finalizar_pedido_directo(query, context: ContextTypes.DEFAULT_TYPE, metodo_pago: str):
+    """Finaliza el pedido después de confirmar pago (sin editar mensaje)"""
+    from app.services.conductor_service import asignar_conductor_a_pedido, calcular_distancia_conductor_cliente
+    
+    carrito = context.user_data.get('carrito', [])
+    chat_id = str(query.message.chat_id)
+    
+    db = get_db()
+    try:
+        cliente = db.query(ClienteBot).filter(ClienteBot.chat_id == chat_id).first()
+        
+        if not cliente:
+            await query.message.chat.send_message("❌ Error: Cliente no encontrado. Usa /start")
+            return
+        
+        total = sum(item['precio'] * item['cantidad'] for item in carrito)
+        codigo_pedido = generar_codigo_pedido()
+        
+        # Obtener observaciones
+        observaciones = context.user_data.get('detalles', '')
+        
+        pedido = Pedido(
+            codigo_pedido=codigo_pedido,
+            cliente_telefono=cliente.telefono,
+            total=Decimal(str(total)),
+            estado="SOLICITADO",
+            latitud_destino=cliente.latitud_ultima,
+            longitud_destino=cliente.longitud_ultima,
+            observaciones=observaciones if observaciones else None
+        )
+        db.add(pedido)
+        
+        for item in carrito:
+            item_pedido = ItemPedido(
+                codigo_pedido=codigo_pedido,
+                codigo_producto=item['codigo'],
+                cantidad=item['cantidad'],
+                precio_unitario=Decimal(str(item['precio']))
+            )
+            db.add(item_pedido)
+        
+        db.commit()
+        
+        # Asignar conductor
+        resultado_asignacion = asignar_conductor_a_pedido(db, codigo_pedido)
+        
+        if resultado_asignacion["exito"]:
+            conductor_info = resultado_asignacion["conductor"]
+            
+            dist_cliente = None
+            tiempo_estimado = None
+            if cliente.latitud_ultima and cliente.longitud_ultima:
+                info_entrega = calcular_distancia_conductor_cliente(
+                    db, 
+                    conductor_info["codigo_conductor"],
+                    float(cliente.latitud_ultima),
+                    float(cliente.longitud_ultima)
+                )
+                dist_cliente = info_entrega.get("distancia_km")
+                tiempo_estimado = info_entrega.get("tiempo_estimado_min")
+            
+            mensaje = f"""
+✅ *¡PEDIDO CONFIRMADO!*
+
+🎫 Código: `{codigo_pedido}`
+💰 Total: Bs. {total:.2f}
+💳 Pago: {metodo_pago}
+
+🚴 *CONDUCTOR ASIGNADO:*
+👤 {conductor_info['nombre']}
+📞 {conductor_info['telefono']}
+🏍️ {conductor_info['tipo_vehiculo']} - {conductor_info['vehiculo']}
+📍 A {conductor_info['distancia_km']} km del restaurante
+
+⏱️ *Tiempo estimado de entrega:* ~{tiempo_estimado or 15} min
+
+¡Tu pedido está en camino! 🎉
+"""
+        else:
+            mensaje = f"""
+✅ *¡PEDIDO CONFIRMADO!*
+
+🎫 Código: `{codigo_pedido}`
+💰 Total: Bs. {total:.2f}
+💳 Pago: {metodo_pago}
+
+📍 Estamos preparando tu pedido...
+⚠️ Buscando repartidor disponible...
+
+Te notificaremos cuando un conductor sea asignado.
+
+¡Gracias por tu compra! 🙏
+"""
+        
+        context.user_data['carrito'] = []
+        context.user_data['detalles'] = ''
+        
+        keyboard = [[InlineKeyboardButton("📦 Ver mis pedidos", callback_data="mis_pedidos")]]
+        await query.message.chat.send_message(
+            mensaje, 
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        
+    except Exception as e:
+        db.rollback()
+        await query.message.chat.send_message(f"❌ Error al procesar el pedido: {str(e)}")
+    finally:
+        db.close()
 
 
 # ============ FINALIZAR PEDIDO ============
@@ -1507,6 +1925,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     chat_id = str(update.effective_chat.id)
     user = update.effective_user
+    
+    # Si está ingresando datos de tarjeta
+    if context.user_data.get('esperando_tarjeta'):
+        procesado = await procesar_datos_tarjeta(update, context)
+        if procesado:
+            return
     
     # Si está esperando detalles del pedido
     if context.user_data.get('esperando_detalles'):
