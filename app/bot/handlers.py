@@ -15,7 +15,9 @@ from app.bot.keyboards import (
     get_mis_pedidos_keyboard,
     get_detalle_pedido_keyboard,
     get_rastrear_keyboard,
-    get_tracking_keyboard
+    get_tracking_keyboard,
+    get_carrito_editar_keyboard,
+    get_item_carrito_keyboard
 )
 from app.database import SessionLocal
 from app.models import Categoria, Producto, ClienteBot, Pedido, ItemPedido, Conductor
@@ -31,6 +33,39 @@ def get_db():
         return db
     finally:
         pass  # Se cierra manualmente después
+
+
+async def _enviar_o_editar_mensaje(query, texto: str, reply_markup=None):
+    """
+    Helper global para enviar o editar mensaje, manejando fotos y texto.
+    Usado por funciones fuera del handle_callbacks.
+    """
+    try:
+        if query.message.photo:
+            # Es una foto, eliminar y enviar nuevo mensaje
+            await query.message.delete()
+            await query.message.chat.send_message(
+                texto,
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+        else:
+            # Es texto, editar
+            await query.edit_message_text(
+                texto,
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+    except Exception:
+        # Fallback: enviar nuevo mensaje
+        try:
+            await query.message.chat.send_message(
+                texto,
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+        except:
+            pass
 
 
 def generar_codigo_pedido() -> str:
@@ -278,6 +313,37 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif data == "resumen_ver":
         await mostrar_resumen_callback(query, context)
+    
+    # ============ EDITAR CARRITO ============
+    elif data == "editar_carrito":
+        await mostrar_editar_carrito(query, context)
+    
+    elif data == "vaciar_carrito":
+        context.user_data['carrito'] = []
+        keyboard = [[InlineKeyboardButton("🔙 Volver al menú", callback_data="volver_menu")]]
+        await enviar_mensaje(
+            "🗑️ *Carrito vaciado*\n\nTu carrito ha sido vaciado completamente.",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    
+    elif data.startswith("carrito_item_"):
+        indice = int(data.replace("carrito_item_", ""))
+        await mostrar_editar_item(query, context, indice)
+    
+    elif data.startswith("carrito_menos_"):
+        indice = int(data.replace("carrito_menos_", ""))
+        await modificar_cantidad_item(query, context, indice, -1)
+    
+    elif data.startswith("carrito_mas_"):
+        indice = int(data.replace("carrito_mas_", ""))
+        await modificar_cantidad_item(query, context, indice, 1)
+    
+    elif data.startswith("carrito_eliminar_"):
+        indice = int(data.replace("carrito_eliminar_", ""))
+        await eliminar_item_carrito(query, context, indice)
+    
+    elif data == "noop":
+        await query.answer()  # No hacer nada, solo responder al callback
     
     elif data == "pagar_pedido":
         carrito = context.user_data.get('carrito', [])
@@ -664,6 +730,132 @@ async def mostrar_resumen_callback(query, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown',
         reply_markup=get_confirmar_pedido_keyboard()
     )
+
+
+# ============ EDITAR CARRITO ============
+async def mostrar_editar_carrito(query, context: ContextTypes.DEFAULT_TYPE):
+    """Muestra el carrito con opciones para editar cada producto"""
+    carrito = context.user_data.get('carrito', [])
+    
+    if not carrito:
+        keyboard = [[InlineKeyboardButton("🔙 Volver al menú", callback_data="volver_menu")]]
+        await _enviar_o_editar_mensaje(
+            query,
+            "🛒 *Tu carrito está vacío*\n\nAgrega productos desde el menú.",
+            InlineKeyboardMarkup(keyboard)
+        )
+        return
+    
+    mensaje = "✏️ *EDITAR CARRITO*\n\n"
+    mensaje += "Selecciona un producto para editar o eliminar:\n\n"
+    
+    total = 0
+    for i, item in enumerate(carrito):
+        subtotal = item['precio'] * item['cantidad']
+        total += subtotal
+        mensaje += f"{i+1}. {item['cantidad']}x {item['nombre']} - Bs. {subtotal:.2f}\n"
+    
+    mensaje += f"\n💰 *TOTAL: Bs. {total:.2f}*"
+    
+    await _enviar_o_editar_mensaje(
+        query,
+        mensaje,
+        get_carrito_editar_keyboard(carrito)
+    )
+
+
+async def mostrar_editar_item(query, context: ContextTypes.DEFAULT_TYPE, indice: int):
+    """Muestra las opciones para editar un item específico del carrito"""
+    carrito = context.user_data.get('carrito', [])
+    
+    if indice < 0 or indice >= len(carrito):
+        await query.answer("❌ Producto no encontrado")
+        await mostrar_editar_carrito(query, context)
+        return
+    
+    item = carrito[indice]
+    subtotal = item['precio'] * item['cantidad']
+    
+    mensaje = f"""
+✏️ *EDITAR PRODUCTO*
+
+🍔 *{item['nombre']}*
+💵 Precio unitario: Bs. {item['precio']:.2f}
+📦 Cantidad: {item['cantidad']}
+💰 Subtotal: Bs. {subtotal:.2f}
+
+Usa los botones para modificar la cantidad:
+"""
+    
+    await _enviar_o_editar_mensaje(
+        query,
+        mensaje,
+        get_item_carrito_keyboard(indice, item)
+    )
+
+
+async def modificar_cantidad_item(query, context: ContextTypes.DEFAULT_TYPE, indice: int, cambio: int):
+    """Modifica la cantidad de un item en el carrito"""
+    carrito = context.user_data.get('carrito', [])
+    
+    if indice < 0 or indice >= len(carrito):
+        await query.answer("❌ Producto no encontrado")
+        return
+    
+    nueva_cantidad = carrito[indice]['cantidad'] + cambio
+    
+    if nueva_cantidad <= 0:
+        # Si la cantidad llega a 0, eliminar el producto
+        nombre = carrito[indice]['nombre']
+        carrito.pop(indice)
+        context.user_data['carrito'] = carrito
+        await query.answer(f"🗑️ {nombre} eliminado")
+        
+        if not carrito:
+            keyboard = [[InlineKeyboardButton("🔙 Volver al menú", callback_data="volver_menu")]]
+            await _enviar_o_editar_mensaje(
+                query,
+                "🛒 *Tu carrito está vacío*\n\nAgrega productos desde el menú.",
+                InlineKeyboardMarkup(keyboard)
+            )
+        else:
+            await mostrar_editar_carrito(query, context)
+        return
+    
+    if nueva_cantidad > 10:
+        await query.answer("⚠️ Máximo 10 unidades por producto")
+        return
+    
+    carrito[indice]['cantidad'] = nueva_cantidad
+    context.user_data['carrito'] = carrito
+    
+    await query.answer(f"📦 Cantidad: {nueva_cantidad}")
+    await mostrar_editar_item(query, context, indice)
+
+
+async def eliminar_item_carrito(query, context: ContextTypes.DEFAULT_TYPE, indice: int):
+    """Elimina un item del carrito"""
+    carrito = context.user_data.get('carrito', [])
+    
+    if indice < 0 or indice >= len(carrito):
+        await query.answer("❌ Producto no encontrado")
+        return
+    
+    nombre = carrito[indice]['nombre']
+    carrito.pop(indice)
+    context.user_data['carrito'] = carrito
+    
+    await query.answer(f"🗑️ {nombre} eliminado")
+    
+    if not carrito:
+        keyboard = [[InlineKeyboardButton("🔙 Volver al menú", callback_data="volver_menu")]]
+        await _enviar_o_editar_mensaje(
+            query,
+            "🛒 *Tu carrito está vacío*\n\nAgrega productos desde el menú.",
+            InlineKeyboardMarkup(keyboard)
+        )
+    else:
+        await mostrar_editar_carrito(query, context)
 
 
 # ============ PROCESAR PAGO ============

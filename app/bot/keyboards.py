@@ -107,7 +107,54 @@ def get_confirmar_pedido_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("✅ Confirmar Pedido", callback_data="confirmar_pedido"),
             InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_pedido"),
         ],
-        [InlineKeyboardButton("➕ Agregar más productos", callback_data="ver_categorias")],
+        [
+            InlineKeyboardButton("✏️ Editar Carrito", callback_data="editar_carrito"),
+            InlineKeyboardButton("➕ Agregar más", callback_data="ver_categorias")
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_carrito_editar_keyboard(carrito: list) -> InlineKeyboardMarkup:
+    """
+    Teclado para editar productos del carrito
+    """
+    keyboard = []
+    
+    for i, item in enumerate(carrito):
+        keyboard.append([
+            InlineKeyboardButton(
+                f"🗑️ {item['nombre']} ({item['cantidad']}x)",
+                callback_data=f"carrito_item_{i}"
+            )
+        ])
+    
+    keyboard.append([
+        InlineKeyboardButton("🗑️ Vaciar Todo", callback_data="vaciar_carrito"),
+        InlineKeyboardButton("📋 Ver Resumen", callback_data="resumen_ver")
+    ])
+    keyboard.append([InlineKeyboardButton("🏠 Volver al menú", callback_data="volver_menu")])
+    
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_item_carrito_keyboard(indice: int, item: dict) -> InlineKeyboardMarkup:
+    """
+    Teclado para editar un item específico del carrito
+    """
+    keyboard = [
+        [
+            InlineKeyboardButton("➖", callback_data=f"carrito_menos_{indice}"),
+            InlineKeyboardButton(f"📦 {item['cantidad']}", callback_data="noop"),
+            InlineKeyboardButton("➕", callback_data=f"carrito_mas_{indice}"),
+        ],
+        [
+            InlineKeyboardButton("🗑️ Eliminar", callback_data=f"carrito_eliminar_{indice}"),
+        ],
+        [
+            InlineKeyboardButton("🔙 Volver al Carrito", callback_data="editar_carrito"),
+            InlineKeyboardButton("📋 Ver Resumen", callback_data="resumen_ver")
+        ],
     ]
     return InlineKeyboardMarkup(keyboard)
 
