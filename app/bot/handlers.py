@@ -1,7 +1,7 @@
 """
 Handlers para el bot de Telegram - Maneja los comandos y mensajes
 """
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 from telegram.ext import ContextTypes
 from app.bot.keyboards import (
     get_main_menu_keyboard,
@@ -452,6 +452,29 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         codigo_pedido = data.replace("actualizar_pedido_", "")
         await mostrar_detalle_pedido(query, context, codigo_pedido)
     
+    elif data == "noop":
+        # No hacer nada - botón decorativo
+        await query.answer()
+        return
+    
+    # Incrementar cantidad en selector de producto
+    elif data.startswith("qty_mas_"):
+        codigo_prod = data.replace("qty_mas_", "")
+        cantidad_actual = context.user_data.get(f'qty_{codigo_prod}', 1)
+        if cantidad_actual < 10:  # Máximo 10
+            context.user_data[f'qty_{codigo_prod}'] = cantidad_actual + 1
+        await actualizar_vista_producto(query, context, codigo_prod)
+        return
+    
+    # Decrementar cantidad en selector de producto
+    elif data.startswith("qty_menos_"):
+        codigo_prod = data.replace("qty_menos_", "")
+        cantidad_actual = context.user_data.get(f'qty_{codigo_prod}', 1)
+        if cantidad_actual > 1:  # Mínimo 1
+            context.user_data[f'qty_{codigo_prod}'] = cantidad_actual - 1
+        await actualizar_vista_producto(query, context, codigo_prod)
+        return
+    
     elif data == "volver_menu":
         # Limpiar mensajes de ubicación pendientes
         await limpiar_mensajes_ubicacion(query, context)
@@ -466,9 +489,13 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=get_ubicacion_keyboard()
         )
     
-    # Seleccionar categoría - MOSTRAR PRODUCTOS CON IMÁGENES
+    # Seleccionar categoría - MOSTRAR PRODUCTOS PAGINADOS
     elif data.startswith("categoria_"):
-        codigo_cat = data.replace("categoria_", "")
+        # Formato: categoria_CODIGO o categoria_CODIGO_PAGINA
+        parts = data.split("_")
+        codigo_cat = parts[1]
+        pagina = int(parts[2]) if len(parts) > 2 else 0
+        
         db = get_db()
         try:
             categoria = db.query(Categoria).filter(Categoria.codigo_categoria == codigo_cat).first()
@@ -484,66 +511,117 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Guardar la categoría actual en el contexto
             context.user_data['categoria_actual'] = codigo_cat
             
-            # Eliminar mensaje anterior
-            try:
-                await query.message.delete()
-            except:
-                pass
+            # Paginación: 5 productos por página
+            PRODUCTOS_POR_PAGINA = 5
+            total_paginas = (len(productos) + PRODUCTOS_POR_PAGINA - 1) // PRODUCTOS_POR_PAGINA
+            inicio = pagina * PRODUCTOS_POR_PAGINA
+            fin = min(inicio + PRODUCTOS_POR_PAGINA, len(productos))
+            productos_pagina = productos[inicio:fin]
             
-            # Enviar cada producto con su imagen
-            for prod in productos:
-                caption = f"🍽️ *{prod.nombre}*\n\n📝 {prod.descripcion or 'Delicioso!'}\n💰 *Bs. {prod.precio}*"
-                
-                # Botones para este producto
-                keyboard = [
-                    [
-                        InlineKeyboardButton("1️⃣", callback_data=f"cantidad_{prod.codigo_producto}_1"),
-                        InlineKeyboardButton("2️⃣", callback_data=f"cantidad_{prod.codigo_producto}_2"),
-                        InlineKeyboardButton("3️⃣", callback_data=f"cantidad_{prod.codigo_producto}_3"),
-                    ],
-                    [
-                        InlineKeyboardButton("4️⃣", callback_data=f"cantidad_{prod.codigo_producto}_4"),
-                        InlineKeyboardButton("5️⃣", callback_data=f"cantidad_{prod.codigo_producto}_5"),
-                        InlineKeyboardButton("6️⃣", callback_data=f"cantidad_{prod.codigo_producto}_6"),
-                    ]
+            # Crear mensaje con título
+            mensaje = f"🍽️ *{categoria.nombre.upper()}*\n"
+            mensaje += f"━━━━━━━━━━━━━━━━━\n"
+            if total_paginas > 1:
+                mensaje += f"📄 Página {pagina + 1}/{total_paginas}\n"
+            mensaje += "\n_Selecciona un producto:_"
+            
+            # Crear botones - uno por fila con nombre completo y precio
+            keyboard = []
+            for prod in productos_pagina:
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"🍔 {prod.nombre} - Bs.{prod.precio}", 
+                        callback_data=f"ver_prod_{prod.codigo_producto}"
+                    )
+                ])
+            
+            # Botones de paginación
+            nav_row = []
+            if pagina > 0:
+                nav_row.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"categoria_{codigo_cat}_{pagina-1}"))
+            if pagina < total_paginas - 1:
+                nav_row.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"categoria_{codigo_cat}_{pagina+1}"))
+            if nav_row:
+                keyboard.append(nav_row)
+            
+            # Botones de acción
+            total_carrito = sum(item['cantidad'] for item in context.user_data.get('carrito', []))
+            keyboard.append([
+                InlineKeyboardButton(f"🛒 Carrito ({total_carrito})", callback_data="resumen_ver"),
+                InlineKeyboardButton("🔙 Categorías", callback_data="menu_ver")
+            ])
+            
+            await enviar_mensaje(
+                mensaje,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        finally:
+            db.close()
+    
+    # Ver producto individual con imagen y opciones de cantidad
+    elif data.startswith("ver_prod_"):
+        codigo_prod = data.replace("ver_prod_", "")
+        db = get_db()
+        try:
+            producto = db.query(Producto).filter(Producto.codigo_producto == codigo_prod).first()
+            
+            if not producto:
+                await query.answer("❌ Producto no encontrado")
+                return
+            
+            # Obtener cantidad actual del selector (default 1)
+            cantidad_actual = context.user_data.get(f'qty_{codigo_prod}', 1)
+            
+            # Caption compacto
+            caption = f"🍔 *{producto.nombre}*\n"
+            caption += f"_{producto.descripcion or 'Delicioso!'}_\n\n"
+            caption += f"💰 *Bs. {producto.precio}* c/u\n"
+            caption += f"📦 *Subtotal: Bs. {float(producto.precio) * cantidad_actual:.2f}*"
+            
+            # Botones con contador funcional
+            keyboard = [
+                [
+                    InlineKeyboardButton("➖", callback_data=f"qty_menos_{codigo_prod}"),
+                    InlineKeyboardButton(f"  {cantidad_actual}  ", callback_data="noop"),
+                    InlineKeyboardButton("➕", callback_data=f"qty_mas_{codigo_prod}"),
+                ],
+                [
+                    InlineKeyboardButton(f"🛒 Agregar {cantidad_actual} al carrito", callback_data=f"cantidad_{codigo_prod}_{cantidad_actual}"),
+                ],
+                [
+                    InlineKeyboardButton("🔙 Volver", callback_data=f"categoria_{producto.codigo_categoria}"),
+                    InlineKeyboardButton("📋 Carrito", callback_data="resumen_ver"),
                 ]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                
-                if prod.img_url:
-                    try:
+            ]
+            
+            if producto.img_url:
+                try:
+                    # Intentar editar si es posible, sino enviar nuevo
+                    if query.message.photo:
+                        await query.edit_message_media(
+                            media=InputMediaPhoto(media=producto.img_url, caption=caption, parse_mode='Markdown'),
+                            reply_markup=InlineKeyboardMarkup(keyboard)
+                        )
+                    else:
+                        await query.message.delete()
                         await query.message.chat.send_photo(
-                            photo=prod.img_url,
+                            photo=producto.img_url,
                             caption=caption,
                             parse_mode='Markdown',
-                            reply_markup=reply_markup
+                            reply_markup=InlineKeyboardMarkup(keyboard)
                         )
-                    except:
-                        # Si falla la imagen, enviar sin ella
-                        await query.message.chat.send_message(
-                            caption,
-                            parse_mode='Markdown',
-                            reply_markup=reply_markup
-                        )
-                else:
-                    await query.message.chat.send_message(
-                        caption,
+                except:
+                    await query.message.chat.send_photo(
+                        photo=producto.img_url,
+                        caption=caption,
                         parse_mode='Markdown',
-                        reply_markup=reply_markup
+                        reply_markup=InlineKeyboardMarkup(keyboard)
                     )
-            
-            # Enviar mensaje con opciones de navegación
-            nav_keyboard = [
-                [
-                    InlineKeyboardButton("📋 Ver Resumen", callback_data="resumen_ver"),
-                    InlineKeyboardButton("🔙 Categorías", callback_data="menu_ver")
-                ],
-                [InlineKeyboardButton("🏠 Volver al Inicio", callback_data="volver_menu")]
-            ]
-            await query.message.chat.send_message(
-                f"👆 *{categoria.nombre}* - Selecciona la cantidad que deseas",
-                parse_mode='Markdown',
-                reply_markup=InlineKeyboardMarkup(nav_keyboard)
-            )
+            else:
+                await enviar_mensaje(
+                    caption,
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
         finally:
             db.close()
     
@@ -581,34 +659,37 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             total_items = sum(item['cantidad'] for item in context.user_data['carrito'])
             total_precio = sum(item['cantidad'] * item['precio'] for item in context.user_data['carrito'])
             
-            mensaje_exito = (
-                f"✅ *{cantidad}x {producto.nombre}* agregado!\n\n"
-                f"🛒 Carrito: {total_items} items - Bs. {total_precio:.2f}"
-            )
+            # Mostrar confirmación rápida en el mismo producto
+            mensaje_exito = f"✅ *+{cantidad}* agregado!\n🛒 Total: {total_items} items - Bs. {total_precio:.2f}"
+            
+            # Botones para seguir agregando o finalizar
+            keyboard = [
+                [
+                    InlineKeyboardButton("1️⃣", callback_data=f"cantidad_{codigo_prod}_1"),
+                    InlineKeyboardButton("2️⃣", callback_data=f"cantidad_{codigo_prod}_2"),
+                    InlineKeyboardButton("3️⃣", callback_data=f"cantidad_{codigo_prod}_3"),
+                ],
+                [
+                    InlineKeyboardButton("📋 Ver Carrito", callback_data="resumen_ver"),
+                    InlineKeyboardButton("✅ Finalizar", callback_data="confirmar_pedido"),
+                ]
+            ]
             
             # Verificar si el mensaje tiene foto (caption) o es texto
             if query.message.photo:
-                # Es una foto, actualizar el caption
                 await query.edit_message_caption(
                     caption=mensaje_exito,
                     parse_mode='Markdown',
-                    reply_markup=get_confirmar_pedido_keyboard()
+                    reply_markup=InlineKeyboardMarkup(keyboard)
                 )
             else:
-                # Es un mensaje de texto
                 await query.edit_message_text(
                     mensaje_exito,
                     parse_mode='Markdown',
-                    reply_markup=get_confirmar_pedido_keyboard()
+                    reply_markup=InlineKeyboardMarkup(keyboard)
                 )
         except Exception as e:
-            # Si hay error, enviar mensaje nuevo
-            await query.message.reply_text(
-                f"✅ *{cantidad}x {producto.nombre}* agregado!\n\n"
-                f"🛒 Carrito actualizado",
-                parse_mode='Markdown',
-                reply_markup=get_confirmar_pedido_keyboard()
-            )
+            await query.answer(f"✅ {cantidad}x {producto.nombre} agregado!")
         finally:
             db.close()
     
@@ -689,6 +770,58 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await finalizar_pedido(query, context, "EFECTIVO")
 
 
+# ============ ACTUALIZAR VISTA PRODUCTO (para contador ➖➕) ============
+async def actualizar_vista_producto(query, context: ContextTypes.DEFAULT_TYPE, codigo_prod: str):
+    """Actualiza la vista del producto con la nueva cantidad"""
+    db = get_db()
+    try:
+        producto = db.query(Producto).filter(Producto.codigo_producto == codigo_prod).first()
+        
+        if not producto:
+            await query.answer("❌ Producto no encontrado")
+            return
+        
+        cantidad_actual = context.user_data.get(f'qty_{codigo_prod}', 1)
+        
+        # Caption con subtotal
+        caption = f"🍔 *{producto.nombre}*\n"
+        caption += f"_{producto.descripcion or 'Delicioso!'}_\n\n"
+        caption += f"💰 *Bs. {producto.precio}* c/u\n"
+        caption += f"📦 *Subtotal: Bs. {float(producto.precio) * cantidad_actual:.2f}*"
+        
+        # Botones con contador
+        keyboard = [
+            [
+                InlineKeyboardButton("➖", callback_data=f"qty_menos_{codigo_prod}"),
+                InlineKeyboardButton(f"  {cantidad_actual}  ", callback_data="noop"),
+                InlineKeyboardButton("➕", callback_data=f"qty_mas_{codigo_prod}"),
+            ],
+            [
+                InlineKeyboardButton(f"🛒 Agregar {cantidad_actual} al carrito", callback_data=f"cantidad_{codigo_prod}_{cantidad_actual}"),
+            ],
+            [
+                InlineKeyboardButton("🔙 Volver", callback_data=f"categoria_{producto.codigo_categoria}"),
+                InlineKeyboardButton("📋 Carrito", callback_data="resumen_ver"),
+            ]
+        ]
+        
+        # Actualizar el mensaje (caption si es foto)
+        if query.message.photo:
+            await query.edit_message_caption(
+                caption=caption,
+                parse_mode='Markdown',
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        else:
+            await query.edit_message_text(
+                caption,
+                parse_mode='Markdown',
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+    finally:
+        db.close()
+
+
 # ============ MOSTRAR RESUMEN ============
 async def mostrar_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Muestra el resumen del carrito"""
@@ -728,10 +861,10 @@ async def mostrar_resumen_callback(query, context: ContextTypes.DEFAULT_TYPE):
     
     if not carrito:
         keyboard = [[InlineKeyboardButton("🔙 Volver al menú", callback_data="volver_menu")]]
-        await query.edit_message_text(
+        await _enviar_o_editar_mensaje(
+            query,
             "🛒 *Tu carrito está vacío*\n\nAgrega productos desde el menú.",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            InlineKeyboardMarkup(keyboard)
         )
         return
     
@@ -748,10 +881,10 @@ async def mostrar_resumen_callback(query, context: ContextTypes.DEFAULT_TYPE):
     
     mensaje += f"\n💰 *TOTAL: Bs. {total:.2f}*"
     
-    await query.edit_message_text(
+    await _enviar_o_editar_mensaje(
+        query,
         mensaje,
-        parse_mode='Markdown',
-        reply_markup=get_confirmar_pedido_keyboard()
+        get_confirmar_pedido_keyboard()
     )
 
 
