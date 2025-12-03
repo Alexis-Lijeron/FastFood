@@ -1,6 +1,3 @@
-"""
-Handlers para el bot de Telegram - Maneja los comandos y mensajes
-"""
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 from telegram.ext import ContextTypes
 from app.bot.keyboards import (
@@ -1581,7 +1578,8 @@ async def mostrar_mis_pedidos(query, context: ContextTypes.DEFAULT_TYPE):
             "📦 *MIS PEDIDOS*\n\n"
             "Selecciona un pedido para ver los detalles:\n\n"
             "🟡 Solicitado | 🟠 Asignado | 🔵 Aceptado\n"
-            "🚴 En Camino | ✅ Entregado | ❌ Cancelado",
+            "🏪 Restaurante | 📦 Recogió | 🚴 En Camino\n"
+            "✅ Entregado | ❌ Cancelado",
             parse_mode='Markdown',
             reply_markup=get_mis_pedidos_keyboard(pedidos)
         )
@@ -1607,6 +1605,8 @@ async def mostrar_detalle_pedido(query, context: ContextTypes.DEFAULT_TYPE, codi
             "SOLICITADO": "🟡 Solicitado",
             "ASIGNADO": "🟠 Asignado",
             "ACEPTADO": "🔵 Aceptado",
+            "EN_RESTAURANTE": "🏪 En Restaurante",
+            "RECOGIO_PEDIDO": "📦 Recogió Pedido",
             "EN_CAMINO": "🚴 En Camino",
             "ENTREGADO": "✅ Entregado",
             "CANCELADO": "❌ Cancelado"
@@ -2167,7 +2167,8 @@ async def mispedidos_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
             "📦 *MIS PEDIDOS*\n\n"
             "Selecciona un pedido para ver los detalles:\n\n"
             "🟡 Solicitado | 🟠 Asignado | 🔵 Aceptado\n"
-            "🚴 En Camino | ✅ Entregado | ❌ Cancelado",
+            "🏪 Restaurante | 📦 Recogió | 🚴 En Camino\n"
+            "✅ Entregado | ❌ Cancelado",
             parse_mode='Markdown',
             reply_markup=get_mis_pedidos_keyboard(pedidos)
         )
@@ -2224,6 +2225,8 @@ async def rastrear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "SOLICITADO": "🟡",
             "ASIGNADO": "🟠",
             "ACEPTADO": "🔵",
+            "EN_RESTAURANTE": "🏪",
+            "RECOGIO_PEDIDO": "📦",
             "EN_CAMINO": "🚴",
             "ENTREGADO": "✅",
             "CANCELADO": "❌"

@@ -81,21 +81,27 @@ def crear_pedido(pedido: PedidoCreate, db: Session = Depends(get_db)):
 def actualizar_estado(codigo: str, nuevo_estado: str, db: Session = Depends(get_db)):
     """
     Actualizar estado del pedido
-    Estados: SOLICITADO -> ASIGNADO -> ACEPTADO -> EN_CAMINO -> ENTREGADO
+    Estados: SOLICITADO -> ASIGNADO -> ACEPTADO -> EN_RESTAURANTE -> RECOGIO_PEDIDO -> EN_CAMINO -> ENTREGADO
     """
-    estados_validos = ["SOLICITADO", "ASIGNADO", "ACEPTADO", "EN_CAMINO", "ENTREGADO", "CANCELADO"]
+    estados_validos = [
+        "SOLICITADO", "ASIGNADO", "ACEPTADO", 
+        "EN_RESTAURANTE", "RECOGIO_PEDIDO", "EN_CAMINO", 
+        "ENTREGADO", "CANCELADO"
+    ]
     
-    if nuevo_estado.upper() not in estados_validos:
+    nuevo_estado = nuevo_estado.upper().replace(" ", "_")
+    
+    if nuevo_estado not in estados_validos:
         raise HTTPException(status_code=400, detail=f"Estado inválido. Use: {estados_validos}")
     
     pedido = db.query(Pedido).filter(Pedido.codigo_pedido == codigo).first()
     if not pedido:
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
     
-    pedido.estado = nuevo_estado.upper()
+    pedido.estado = nuevo_estado
     db.commit()
     
-    return {"mensaje": f"Estado actualizado a {nuevo_estado.upper()}"}
+    return {"mensaje": f"Estado actualizado a {nuevo_estado}"}
 
 
 @router.put("/{codigo}/asignar/{codigo_conductor}")

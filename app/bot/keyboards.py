@@ -1,6 +1,3 @@
-"""
-Teclados y botones para el bot de Telegram
-"""
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
 

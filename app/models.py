@@ -19,8 +19,8 @@ class ClienteBot(Base):
     telefono = Column(String(20), primary_key=True)
     chat_id = Column(String(50), unique=True, nullable=False)
     nombre = Column(String(100))
-    latitud_ultima = Column(DECIMAL(10, 8))
-    longitud_ultima = Column(DECIMAL(10, 8))
+    latitud_ultima = Column(DECIMAL(12, 8))  # 4 enteros + 8 decimales
+    longitud_ultima = Column(DECIMAL(12, 8))  # 4 enteros + 8 decimales
     fecha_registro = Column(TIMESTAMP, server_default=func.now())
     
     # Relación con pedidos
@@ -48,8 +48,8 @@ class Conductor(Base):
     tipo_vehiculo = Column(String(20))  # MOTO, AUTO
     vehiculo = Column(String(50))
     telefono = Column(String(20))
-    latitud = Column(DECIMAL(10, 8))
-    longitud = Column(DECIMAL(10, 8))
+    latitud = Column(DECIMAL(12, 8))  # 4 enteros + 8 decimales
+    longitud = Column(DECIMAL(12, 8))  # 4 enteros + 8 decimales
     is_disponible = Column(Boolean, default=True)
     ultima_actualizacion = Column(TIMESTAMP, server_default=func.now())
     
@@ -85,10 +85,10 @@ class Pedido(Base):
     observaciones = Column(Text, nullable=True)  # Detalles extra del pedido
     cliente_telefono = Column(String(20), ForeignKey("cliente_bot.telefono"))
     conductor_codigo = Column(String(100), ForeignKey("conductor.codigo_conductor"))
-    latitud_origen = Column(DECIMAL(10, 8), default=-17.7838759)
-    longitud_origen = Column(DECIMAL(10, 8), default=-63.1817578)
-    latitud_destino = Column(DECIMAL(10, 8))
-    longitud_destino = Column(DECIMAL(10, 8))
+    latitud_origen = Column(DECIMAL(12, 8), default=-17.7838759)  # 4 enteros + 8 decimales
+    longitud_origen = Column(DECIMAL(12, 8), default=-63.1817578)  # 4 enteros + 8 decimales
+    latitud_destino = Column(DECIMAL(12, 8))  # 4 enteros + 8 decimales
+    longitud_destino = Column(DECIMAL(12, 8))  # 4 enteros + 8 decimales
     
     # Relaciones
     cliente = relationship("ClienteBot", back_populates="pedidos")

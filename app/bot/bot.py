@@ -1,6 +1,3 @@
-"""
-Bot de Telegram - Configuración y ejecución principal
-"""
 from telegram.ext import (
     Application,
     CommandHandler,
